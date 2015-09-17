@@ -43,7 +43,6 @@ static exti_ctx_t exti_ctx[GPIO_ISR_CHAN_NUMOF];
 /**
  * @brief   Extract the port base address from the given pin identifier
  */
-
 static inline GPIO_TypeDef *_port(gpio_t pin)
 {
     return (GPIO_TypeDef *)(pin & ~(0x0f));
@@ -77,7 +76,7 @@ int gpio_init(gpio_t pin, gpio_dir_t dir, gpio_pp_t pullup)
     RCC->AHBENR |= (RCC_AHBENR_GPIOAEN << _port_num(pin));
     /* configure pull register */
     port->PUPDR &= ~(3 << (2 * pin_num));
-    port->PUPDR |= (pushpull << (2 * pin_num));
+    port->PUPDR |= (pullup << (2 * pin_num));
     /* set direction */
     if (dir == GPIO_DIR_OUT) {
         port->MODER &= ~(3 << (2 * pin_num));   /* set pin to output mode */
@@ -101,9 +100,6 @@ int gpio_init_int(gpio_t pin, gpio_pp_t pullup, gpio_flank_t flank, gpio_cb_t cb
     exti_ctx[pin_num].cb = cb;
     exti_ctx[pin_num].arg = arg;
 
-    /* enable the SYSCFG clock */
-    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
-
     /* enable clock of the SYSCFG module for EXTI configuration */
     RCC->APB2ENR |= RCC_APB2ENR_SYSCFGCOMPEN;
 
@@ -112,14 +108,14 @@ int gpio_init_int(gpio_t pin, gpio_pp_t pullup, gpio_flank_t flank, gpio_cb_t cb
     gpio_init(pin, GPIO_DIR_IN, pullup);
 
     /* enable global pin interrupt */
-    if (pin_num < 5) {
-        NVIC_EnableIRQ(EXTI0_IRQn + pin_num);
+    if (pin_num < 2) {
+        NVIC_EnableIRQ(EXTI2_3_IRQn + pin_num);
     }
-    else if (pin_num < 10) {
-        NVIC_EnableIRQ(EXTI9_5_IRQn);
+    else if (pin_num < 4) {
+        NVIC_EnableIRQ(EXTI2_3_IRQn);
     }
     else {
-        NVIC_EnableIRQ(EXTI15_10_IRQn);
+        NVIC_EnableIRQ(EXTI4_15_IRQn);
     }
     /* configure the active flank */
     EXTI->RTSR &= ~(1 << pin_num);
