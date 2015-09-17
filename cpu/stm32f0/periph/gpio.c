@@ -200,18 +200,18 @@ void gpio_clear(gpio_t pin)
 void gpio_toggle(gpio_t pin)
 {
     if (gpio_read(pin)) {
-        gpio_clear(pin);
+        _port(pin)->BSRRH = (1 << _pin_num(pin));
     } else {
-        gpio_set(pin);
+        _port(pin)->BSRRL = (1 << _pin_num(pin));
     }
 }
 
 void gpio_write(gpio_t pin, int value)
 {
     if (value) {
-        gpio_set(pin);
+        _port(pin)->BSRRL = (1 << _pin_num(pin));
     } else {
-        gpio_clear(pin);
+        _port(pin)->BSRRH = (1 << _pin_num(pin));
     }
 }
 
