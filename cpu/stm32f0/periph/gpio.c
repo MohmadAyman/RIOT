@@ -121,25 +121,11 @@ int gpio_init_int(gpio_t pin, gpio_pp_t pullup, gpio_flank_t flank, gpio_cb_t cb
     else {
         NVIC_EnableIRQ(EXTI15_10_IRQn);
     }
-
-
-
-    /* configure the event that triggers an interrupt */
-    switch (flank) {
-        case GPIO_RISING:
-            EXTI->RTSR |= (1 << pin_num);
-            EXTI->FTSR &= ~(1 << pin_num);
-            break;
-        case GPIO_FALLING:
-            EXTI->RTSR &= ~(1 << pin_num);
-            EXTI->FTSR |= (1 << pin_num);
-            break;
-        case GPIO_BOTH:
-            EXTI->RTSR |= (1 << pin_num);
-            EXTI->FTSR |= (1 << pin_num);
-            break;
-    }
-
+    /* configure the active flank */
+    EXTI->RTSR &= ~(1 << pin_num);
+    EXTI->RTSR |=  ((flank & 0x1) << pin_num);
+    EXTI->FTSR &= ~(1 << pin_num);
+    EXTI->FTSR |=  ((flank >> 1) << pin_num);
     /* enable specific pin as exti sources */
     SYSCFG->EXTICR[pin_num >> 2] &= ~(0xf << ((pin_num & 0x03) * 4));
     SYSCFG->EXTICR[pin_num >> 2] |= (port_num << ((pin_num & 0x03) * 4));
