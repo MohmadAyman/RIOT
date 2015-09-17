@@ -24,8 +24,6 @@
 #include "periph/gpio.h"
 #include "periph_conf.h"
 
-#define ENABLE_DEBUG    (0)
-#include "debug.h"
 
 /**
  * @brief   The STM32F3 has 16 EXTI channels
@@ -74,8 +72,6 @@ int gpio_init(gpio_t pin, gpio_dir_t dir, gpio_pp_t pullup)
 {
     GPIO_TypeDef *port = _port(pin);
     int pin_num = _pin_num(pin);
-
-    DEBUG("Init %i: port %i, pin %i\n", dir, pin_num, _port_num(pin));
 
     /* enable clock */
     RCC->AHBENR |= (RCC_AHBENR_GPIOAEN << _port_num(pin));
