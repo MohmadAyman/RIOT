@@ -30,5 +30,13 @@ int main(void)
     printf("You are running RIOT on a(n) %s board.\n", RIOT_BOARD);
     printf("This board features a(n) %s MCU.\n", RIOT_MCU);
     gpio_init_af(3, GPIO_AF0);
+    gpio_irq_enable(10);
+    gpio_set(2);
+    gpio_clear(2);
+    gpio_toggle(4);
+    gpio_write(5,1);
+    gpio_read(5);
+    gpio_irq_enable(10);
+    gpio_init_int(1,0, 0, 0,0);
     return 0;
 }
