@@ -22,6 +22,8 @@
 #include <stdio.h>
 #include <periph/gpio.h>
 #include <periph_conf.h>
+#define ENABLE_DEBUG (0)
+#include "debug.h"
 short i=0;
 
 int main(void)
