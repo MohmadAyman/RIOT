@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <periph/gpio.h>
 #include <periph_conf.h>
+short i=0;
 
 int main(void)
 {
@@ -38,5 +39,11 @@ int main(void)
     gpio_read(5);
     gpio_irq_enable(10);
     gpio_init_int(1,0, 0, 0,0);
+    while(1){
+        i++;
+        printf("%d\n", i);
+        if(i==100)
+            i = 0;
+    }
     return 0;
 }

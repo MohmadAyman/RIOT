@@ -196,16 +196,16 @@ void gpio_write(gpio_t pin, int value)
         _port(pin)->BSRRH = (1 << _pin_num(pin));
     }
 }
-/*
+
 void isr_exti(void)
 {
     for (int i = 0; i < GPIO_ISR_CHAN_NUMOF; i++) {
         if (EXTI->PR & (1 << i)) {
-            EXTI->PR = (1 << i);        
+            EXTI->PR = (1 << i);        /* clear by writing a 1 */
             exti_ctx[i].cb(exti_ctx[i].arg);
         }
     }
     if (sched_context_switch_request) {
         thread_yield();
     }
-}*/
+}
