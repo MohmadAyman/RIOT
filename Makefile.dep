@@ -225,6 +225,10 @@ ifneq (,$(filter gnrc_ipv6_ext,$(USEMODULE)))
   USEMODULE += gnrc_ipv6
 endif
 
+ifneq (,$(filter gnrc_ipv6_whitelist,$(USEMODULE)))
+  USEMODULE += ipv6_addr
+endif
+
 ifneq (,$(filter gnrc_ipv6_router,$(USEMODULE)))
   USEMODULE += gnrc_ipv6
 endif
@@ -258,6 +262,7 @@ ifneq (,$(filter gnrc_ipv6_netif,$(USEMODULE)))
   USEMODULE += ipv6_addr
   USEMODULE += gnrc_netif
   USEMODULE += bitfield
+  USEMODULE += vtimer
 endif
 
 ifneq (,$(filter gnrc_udp,$(USEMODULE)))
@@ -285,6 +290,10 @@ endif
 ifneq (,$(filter posix_sockets,$(USEMODULE)))
   USEMODULE += posix
   USEMODULE += random
+endif
+
+ifneq (,$(filter uart_stdio,$(USEMODULE)))
+  USEMODULE += tsrb
 endif
 
 ifneq (,$(filter posix,$(USEMODULE)))
@@ -414,6 +423,10 @@ endif
 
 ifneq (,$(filter ltc4150,$(USEMODULE)))
     USEMODULE += xtimer
+endif
+
+ifneq (,$(filter at30tse75x,$(USEMODULE)))
+  USEMODULE += xtimer
 endif
 
 ifneq (,$(filter pthread,$(USEMODULE)))
