@@ -119,8 +119,19 @@ void nmi_default(void)
 /* The hard fault handler requires some stack space as a working area for local
  * variables and printf function calls etc. If the stack pointer is located
  * closer than HARDFAULT_HANDLER_REQUIRED_STACK_SPACE from the lowest address of
- * RAM we will reset the stack pointer to the top of available RAM. */
-#define HARDFAULT_HANDLER_REQUIRED_STACK_SPACE (THREAD_EXTRA_STACKSIZE_PRINTF)
+ * RAM we will reset the stack pointer to the top of available RAM.
+ * Measured from trampoline entry to breakpoint:
+ *  - Cortex-M0+ 344 Byte
+ *  - Cortex-M4  344 Byte
+ */
+#define HARDFAULT_HANDLER_REQUIRED_STACK_SPACE          (344U)
+
+static inline int _stack_size_left(uint32_t required)
+{
+    uint32_t* sp;
+    asm volatile ("mov %[sp], sp" : [sp] "=r" (sp) : : );
+    return ((int)((uint32_t)sp - (uint32_t)&_sstack) - required);
+}
 
 /* Trampoline function to save stack pointer before calling hard fault handler */
 void hard_fault_default(void)
@@ -153,11 +164,11 @@ void hard_fault_default(void)
         " out:                              \n" /* }                          */
 #if (__CORTEX_M == 0)
         "push {r4-r7}                       \n" /* save r4..r7 to the stack   */
-        "mov r4, r8                         \n" /*                            */
-        "mov r5, r9                         \n" /*                            */
-        "mov r6, r10                        \n" /*                            */
-        "mov r7, r11                        \n" /*                            */
-        "push {r4-r7}                       \n" /* save r8..r11 to the stack  */
+        "mov r3, r8                         \n" /*                            */
+        "mov r4, r9                         \n" /*                            */
+        "mov r5, r10                        \n" /*                            */
+        "mov r6, r11                        \n" /*                            */
+        "push {r3-r6}                       \n" /* save r8..r11 to the stack  */
 #else
         "push {r4-r11}                      \n" /* save r4..r11 to the stack  */
 #endif
@@ -167,7 +178,7 @@ void hard_fault_default(void)
           : [sram]   "r" (&_sram + HARDFAULT_HANDLER_REQUIRED_STACK_SPACE),
             [eram]   "r" (&_eram),
             [estack] "r" (&_estack)
-          : "r4","r5","r6","r7","r8","r9","r10","r11","lr"
+          : "r0","r4","r5","r6","r8","r9","r10","r11","lr"
     );
 }
 
@@ -181,7 +192,11 @@ void hard_fault_default(void)
 
 __attribute__((used)) void hard_fault_handler(uint32_t* sp, uint32_t corrupted, uint32_t exc_return, uint32_t* r4_to_r11_stack)
 {
-
+    /* Check if the ISR stack overflowed previously. Not possible to detect
+     * after output may also have overflowed it. */
+    if(*(&_sstack) != STACK_CANARY_WORD) {
+        puts("\nISR stack overflowed");
+    }
     /* Sanity check stack pointer and give additional feedback about hard fault */
     if( corrupted ) {
         puts("Stack pointer corrupted, reset to top of stack");
@@ -246,6 +261,10 @@ __attribute__((used)) void hard_fault_handler(uint32_t* sp, uint32_t corrupted, 
         printf("EXC_RET: 0x%08" PRIx32 "\n", exc_return);
         puts("Attempting to reconstruct state for debugging...");
         printf("In GDB:\n  set $pc=0x%lx\n  frame 0\n  bt\n", pc);
+        int stack_left = _stack_size_left(HARDFAULT_HANDLER_REQUIRED_STACK_SPACE);
+        if(stack_left < 0) {
+            printf("\nISR stack overflowed by at least %d bytes.\n", (-1 * stack_left));
+        }
         __ASM volatile (
             "mov r0, %[sp]\n"
             "ldr r2, [r0, #8]\n"

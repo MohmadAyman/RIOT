@@ -44,13 +44,16 @@ static size_t _get_l2src(kernel_pid_t iface, uint8_t *l2src, size_t l2src_maxlen
  * @brief   Sends @ref GNRC_NETAPI_MSG_TYPE_SND delayed.
  *
  * @param[in] t         Timer for the delay.
+ * @param[in] msg       Msg for the timer.
  * @param[in] interval  Delay interval.
  * @param[in] pkt       Packet to send delayed.
  */
-static inline void _send_delayed(vtimer_t *t, timex_t interval, gnrc_pktsnip_t *pkt)
+static inline void _send_delayed(xtimer_t *t, msg_t *msg, uint32_t interval, gnrc_pktsnip_t *pkt)
 {
-    vtimer_remove(t);
-    vtimer_set_msg(t, interval, gnrc_ipv6_pid, GNRC_NETAPI_MSG_TYPE_SND, pkt);
+    xtimer_remove(t);
+    msg->type = GNRC_NETAPI_MSG_TYPE_SND;
+    msg->content.ptr = (char *) pkt;
+    xtimer_set_msg(t, interval, msg, gnrc_ipv6_pid);
 }
 
 
@@ -113,9 +116,8 @@ void gnrc_ndp_internal_set_state(gnrc_ipv6_nc_t *nc_entry, uint8_t state)
                       GNRC_NDP_FIRST_PROBE_DELAY);
             }
 #endif
-            vtimer_remove(&nc_entry->nbr_sol_timer);
-            vtimer_set_msg(&nc_entry->nbr_sol_timer, t, gnrc_ipv6_pid,
-                           GNRC_NDP_MSG_NC_STATE_TIMEOUT, nc_entry);
+            gnrc_ndp_internal_reset_nbr_sol_timer(nc_entry, (uint32_t) timex_uint64(t),
+                                                  GNRC_NDP_MSG_NC_STATE_TIMEOUT, gnrc_ipv6_pid);
             break;
 
         case GNRC_IPV6_NC_STATE_PROBE:
@@ -131,10 +133,10 @@ void gnrc_ndp_internal_set_state(gnrc_ipv6_nc_t *nc_entry, uint8_t state)
                                            &nc_entry->ipv6_addr);
 
             mutex_lock(&ipv6_iface->mutex);
-            vtimer_remove(&nc_entry->nbr_sol_timer);
-            vtimer_set_msg(&nc_entry->nbr_sol_timer,
-                           ipv6_iface->retrans_timer, gnrc_ipv6_pid,
-                           GNRC_NDP_MSG_NBR_SOL_RETRANS, nc_entry);
+            gnrc_ndp_internal_reset_nbr_sol_timer(nc_entry, (uint32_t) timex_uint64(
+                                                    ipv6_iface->retrans_timer
+                                                  ),
+                                                  GNRC_NDP_MSG_NBR_SOL_RETRANS, gnrc_ipv6_pid);
             mutex_unlock(&ipv6_iface->mutex);
             break;
 
@@ -214,14 +216,15 @@ void gnrc_ndp_internal_send_nbr_adv(kernel_pid_t iface, ipv6_addr_t *tgt, ipv6_a
     if (gnrc_ipv6_netif_addr_is_non_unicast(tgt)) {
         /* avoid collision for anycast addresses
          * (see https://tools.ietf.org/html/rfc4861#section-7.2.7) */
-        timex_t delay = { 0, genrand_uint32_range(0, GNRC_NDP_MAX_AC_TGT_DELAY * SEC_IN_USEC) };
-        timex_normalize(&delay);
-        gnrc_ipv6_nc_t *nc_entry = gnrc_ipv6_nc_get(iface, tgt);
+        uint32_t delay = genrand_uint32_range(0, GNRC_NDP_MAX_AC_TGT_DELAY * SEC_IN_USEC);
+        gnrc_ipv6_nc_t *nc_entry = gnrc_ipv6_nc_get(iface, dst);
         DEBUG("ndp internal: delay neighbor advertisement for %" PRIu32 " sec.",
-              delay.seconds);
+              (delay / SEC_IN_USEC));
 
         /* nc_entry must be set so no need to check it */
-        _send_delayed(&nc_entry->nbr_adv_timer, delay, hdr);
+        assert(nc_entry);
+
+        _send_delayed(&nc_entry->nbr_adv_timer, &nc_entry->nbr_adv_msg, delay, hdr);
     }
     else if (gnrc_netapi_send(gnrc_ipv6_pid, hdr) < 1) {
         DEBUG("ndp internal: unable to send neighbor advertisement\n");
@@ -617,7 +620,7 @@ int gnrc_ndp_internal_sl2a_opt_handle(gnrc_pktsnip_t *pkt, ipv6_hdr_t *ipv6, uin
         case ICMPV6_RTR_ADV:
         case ICMPV6_NBR_SOL:
             if (sl2a_len == 0) {  /* in case there was no source address in l2 */
-                sl2a_len = (sl2a_opt->len / 8) - sizeof(ndp_opt_t);
+                sl2a_len = (sl2a_opt->len * 8) - sizeof(ndp_opt_t);
 
                 /* ignore all zeroes at the end for length */
                 for (; sl2a[sl2a_len - 1] == 0x00; sl2a_len--);
@@ -750,11 +753,10 @@ bool gnrc_ndp_internal_pi_opt_handle(kernel_pid_t iface, uint8_t icmpv6_type,
     }
     netif_addr->valid = byteorder_ntohl(pi_opt->valid_ltime);
     netif_addr->preferred = byteorder_ntohl(pi_opt->pref_ltime);
-    vtimer_remove(&netif_addr->valid_timeout);
     if (netif_addr->valid != UINT32_MAX) {
-        vtimer_set_msg(&netif_addr->valid_timeout,
-                       timex_set(byteorder_ntohl(pi_opt->valid_ltime), 0),
-                       thread_getpid(), GNRC_NDP_MSG_ADDR_TIMEOUT, &netif_addr->addr);
+        xtimer_set_msg(&netif_addr->valid_timeout,
+                       (byteorder_ntohl(pi_opt->valid_ltime) * SEC_IN_USEC),
+                       &netif_addr->valid_timeout_msg, thread_getpid());
     }
     /* TODO: preferred lifetime for address auto configuration */
     /* on-link flag MUST stay set if it was */

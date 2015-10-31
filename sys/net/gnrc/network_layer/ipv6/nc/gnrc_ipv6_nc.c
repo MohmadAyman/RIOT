@@ -21,6 +21,7 @@
 #include "net/gnrc/ipv6/netif.h"
 #include "net/gnrc/ndp.h"
 #include "net/gnrc/pktbuf.h"
+#include "net/gnrc/sixlowpan/nd.h"
 #include "thread.h"
 #include "timex.h"
 #include "vtimer.h"
@@ -127,6 +128,21 @@ gnrc_ipv6_nc_t *gnrc_ipv6_nc_add(kernel_pid_t iface, const ipv6_addr_t *ipv6_add
         free_entry->probes_remaining = GNRC_NDP_MAX_MC_NBR_SOL_NUMOF;
     }
 
+#ifdef MODULE_GNRC_SIXLOWPAN_ND_ROUTER
+    free_entry->type_timeout_msg.type = GNRC_SIXLOWPAN_ND_MSG_AR_TIMEOUT;
+    free_entry->type_timeout_msg.content.ptr = (char *) free_entry;
+#endif
+
+    free_entry->rtr_timeout_msg.type = GNRC_NDP_MSG_RTR_TIMEOUT;
+    free_entry->rtr_timeout_msg.content.ptr = (char *) free_entry;
+
+#if defined(MODULE_GNRC_NDP_ROUTER) || defined(MODULE_GNRC_SIXLOWPAN_ND_BORDER_ROUTER)
+    free_entry->rtr_adv_msg.type = GNRC_NDP_MSG_RTR_ADV_DELAY;
+    free_entry->rtr_adv_msg.content.ptr = (char *) free_entry;
+#endif
+
+    free_entry->nbr_sol_msg.content.ptr = (char *) free_entry;
+
     return free_entry;
 }
 
@@ -146,11 +162,11 @@ void gnrc_ipv6_nc_remove(kernel_pid_t iface, const ipv6_addr_t *ipv6_addr)
             gnrc_pktqueue_remove_head(&entry->pkts);
         }
 #endif
-#ifdef MODULE_GNRC_SIXLOWPAN_ND
-        vtimer_remove(&entry->rtr_sol_timer);
-#endif
 #ifdef MODULE_GNRC_SIXLOWPAN_ND_ROUTER
-        vtimer_remove(&entry->type_timeout);
+        xtimer_remove(&entry->type_timeout);
+#endif
+#if defined(MODULE_GNRC_NDP_ROUTER) || defined(MODULE_GNRC_SIXLOWPAN_ND_BORDER_ROUTER)
+        xtimer_remove(&entry->rtr_adv_timer);
 #endif
 
         ipv6_addr_set_unspecified(&(entry->ipv6_addr));
@@ -229,9 +245,8 @@ gnrc_ipv6_nc_t *gnrc_ipv6_nc_still_reachable(const ipv6_addr_t *ipv6_addr)
         gnrc_ipv6_netif_t *iface = gnrc_ipv6_netif_get(entry->iface);
         timex_t t = iface->reach_time;
 
-        vtimer_remove(&entry->nbr_sol_timer);
-        vtimer_set_msg(&entry->nbr_sol_timer, t, gnrc_ipv6_pid,
-                       GNRC_NDP_MSG_NC_STATE_TIMEOUT, entry);
+        gnrc_ndp_internal_reset_nbr_sol_timer(entry, (uint32_t) timex_uint64(t),
+                                              GNRC_NDP_MSG_NC_STATE_TIMEOUT, gnrc_ipv6_pid);
 #endif
 
         DEBUG("ipv6_nc: Marking entry %s as reachable\n",
