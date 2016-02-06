@@ -13,6 +13,9 @@ endif
 ifneq (,$(filter gnrc_icmpv6_echo,$(USEMODULE)))
     DIRS += network_layer/icmpv6/echo
 endif
+ifneq (,$(filter gnrc_icmpv6_error,$(USEMODULE)))
+    DIRS += network_layer/icmpv6/error
+endif
 ifneq (,$(filter gnrc_ipv6,$(USEMODULE)))
     DIRS += network_layer/ipv6
 endif
@@ -30,6 +33,9 @@ ifneq (,$(filter gnrc_ipv6_netif,$(USEMODULE)))
 endif
 ifneq (,$(filter gnrc_ipv6_whitelist,$(USEMODULE)))
     DIRS += network_layer/ipv6/whitelist
+endif
+ifneq (,$(filter gnrc_ipv6_blacklist,$(USEMODULE)))
+    DIRS += network_layer/ipv6/blacklist
 endif
 ifneq (,$(filter gnrc_ndp,$(USEMODULE)))
     DIRS += network_layer/ndp
@@ -108,6 +114,9 @@ ifneq (,$(filter gnrc_udp,$(USEMODULE)))
 endif
 ifneq (,$(filter gnrc_zep,$(USEMODULE)))
     DIRS += application_layer/zep
+endif
+ifneq (,$(filter gnrc_tftp,$(USEMODULE)))
+    DIRS += application_layer/tftp
 endif
 
 include $(RIOTBASE)/Makefile.base

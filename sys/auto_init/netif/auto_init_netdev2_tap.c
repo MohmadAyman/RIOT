@@ -19,11 +19,11 @@
 
 #ifdef MODULE_NETDEV2_TAP
 
-#define ENABLE_DEBUG (1)
+#define ENABLE_DEBUG (0)
 #include "debug.h"
 
 #include "netdev2_tap.h"
-#include "net/gnrc/gnrc_netdev2_eth.h"
+#include "net/gnrc/netdev2/eth.h"
 
 extern netdev2_tap_t netdev2_tap;
 

@@ -23,8 +23,7 @@
 #include "net/gnrc/pktbuf.h"
 #include "net/gnrc/sixlowpan/nd.h"
 #include "thread.h"
-#include "timex.h"
-#include "vtimer.h"
+#include "xtimer.h"
 
 #define ENABLE_DEBUG    (0)
 #include "debug.h"
@@ -124,7 +123,7 @@ gnrc_ipv6_nc_t *gnrc_ipv6_nc_add(kernel_pid_t iface, const ipv6_addr_t *ipv6_add
     DEBUG(" with flags = 0x%0x\n", flags);
 
     if (gnrc_ipv6_nc_get_state(free_entry) == GNRC_IPV6_NC_STATE_INCOMPLETE) {
-        DEBUG("ipv6_nc: Set remaining probes to %" PRIu8 "\n", GNRC_NDP_MAX_MC_NBR_SOL_NUMOF);
+        DEBUG("ipv6_nc: Set remaining probes to %" PRIu8 "\n", (uint8_t) GNRC_NDP_MAX_MC_NBR_SOL_NUMOF);
         free_entry->probes_remaining = GNRC_NDP_MAX_MC_NBR_SOL_NUMOF;
     }
 
@@ -164,6 +163,13 @@ void gnrc_ipv6_nc_remove(kernel_pid_t iface, const ipv6_addr_t *ipv6_addr)
 #endif
 #ifdef MODULE_GNRC_SIXLOWPAN_ND_ROUTER
         xtimer_remove(&entry->type_timeout);
+
+        gnrc_ipv6_netif_t *if_entry = gnrc_ipv6_netif_get(iface);
+
+        if ((if_entry != NULL) && (if_entry->rtr_adv_msg.content.ptr == (char *) entry)) {
+            /* cancel timer set by gnrc_ndp_rtr_sol_handle */
+            xtimer_remove(&if_entry->rtr_adv_timer);
+        }
 #endif
 #if defined(MODULE_GNRC_NDP_ROUTER) || defined(MODULE_GNRC_SIXLOWPAN_ND_BORDER_ROUTER)
         xtimer_remove(&entry->rtr_adv_timer);
@@ -184,7 +190,8 @@ gnrc_ipv6_nc_t *gnrc_ipv6_nc_get(kernel_pid_t iface, const ipv6_addr_t *ipv6_add
 
     for (int i = 0; i < GNRC_IPV6_NC_SIZE; i++) {
         if (((ncache[i].iface == KERNEL_PID_UNDEF) || (iface == KERNEL_PID_UNDEF) ||
-             (iface == ncache[i].iface)) && ipv6_addr_equal(&(ncache[i].ipv6_addr), ipv6_addr)) {
+             (iface == ncache[i].iface)) &&
+            ipv6_addr_equal(&(ncache[i].ipv6_addr), ipv6_addr)) {
             DEBUG("ipv6_nc: Found entry for %s on interface %" PRIkernel_pid
                   " (0 = all interfaces) [%p]\n",
                   ipv6_addr_to_str(addr_str, ipv6_addr, sizeof(addr_str)),
@@ -243,9 +250,8 @@ gnrc_ipv6_nc_t *gnrc_ipv6_nc_still_reachable(const ipv6_addr_t *ipv6_addr)
         (gnrc_ipv6_nc_get_state(entry) != GNRC_IPV6_NC_STATE_UNMANAGED)) {
 #if defined(MODULE_GNRC_IPV6_NETIF) && defined(MODULE_VTIMER) && defined(MODULE_GNRC_IPV6)
         gnrc_ipv6_netif_t *iface = gnrc_ipv6_netif_get(entry->iface);
-        timex_t t = iface->reach_time;
 
-        gnrc_ndp_internal_reset_nbr_sol_timer(entry, (uint32_t) timex_uint64(t),
+        gnrc_ndp_internal_reset_nbr_sol_timer(entry, iface->reach_time,
                                               GNRC_NDP_MSG_NC_STATE_TIMEOUT, gnrc_ipv6_pid);
 #endif
 
@@ -256,6 +262,18 @@ gnrc_ipv6_nc_t *gnrc_ipv6_nc_still_reachable(const ipv6_addr_t *ipv6_addr)
     }
 
     return entry;
+}
+
+kernel_pid_t gnrc_ipv6_nc_get_l2_addr(uint8_t *l2_addr, uint8_t *l2_addr_len,
+                                      const gnrc_ipv6_nc_t *entry)
+{
+    assert((l2_addr != NULL) && (l2_addr_len != NULL));
+    if ((entry == NULL) || !gnrc_ipv6_nc_is_reachable(entry)) {
+        return KERNEL_PID_UNDEF;
+    }
+    *l2_addr_len = entry->l2_addr_len;
+    memcpy(l2_addr, entry->l2_addr, entry->l2_addr_len);
+    return entry->iface;
 }
 
 /** @} */

@@ -35,15 +35,10 @@
  */
 #define GPIO_ISR_CHAN_NUMOF             (16U)
 
-typedef struct {
-    gpio_cb_t cb;       /**< callback called from GPIO interrupt */
-    void *arg;          /**< argument passed to the callback */
-} exti_ctx_t;
-
 /**
  * @brief   Allocate memory for one callback and argument per EXTI channel
  */
-static exti_ctx_t exti_ctx[GPIO_ISR_CHAN_NUMOF];
+static gpio_isr_ctx_t exti_ctx[GPIO_ISR_CHAN_NUMOF];
 
 /**
  * @brief   Extract the pin's port base address from the given pin identifier
@@ -170,7 +165,7 @@ int gpio_read(gpio_t pin)
     GPIO_TypeDef *port = _port(pin);
     int pin_num = _pin_num(pin);
 
-    if (port->CR[pin_num >> 3] & (0x3 << (pin_num & 0x7))) {
+    if (port->CR[pin_num >> 3] & (0x3 << ((pin_num & 0x7) << 2))) {
         /* pin is output */
         return (port->ODR & (1 << pin_num));
     }
@@ -212,7 +207,7 @@ void gpio_write(gpio_t pin, int value)
 
 void isr_exti(void)
 {
-    for (int i = 0; i < GPIO_ISR_CHAN_NUMOF; i++) {
+    for (unsigned i = 0; i < GPIO_ISR_CHAN_NUMOF; i++) {
         if (EXTI->PR & (1 << i)) {
             EXTI->PR = (1 << i);        /* clear by writing a 1 */
             exti_ctx[i].cb(exti_ctx[i].arg);

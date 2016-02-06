@@ -30,17 +30,9 @@
 #include "periph_conf.h"
 
 /**
- * @brief   Datastructure to hold an interrupt context
- */
-typedef struct {
-    void (*cb)(void *arg);      /**< interrupt callback routine */
-    void *arg;                  /**< optional argument */
-} exti_ctx_t;
-
-/**
  * @brief   Place to store the interrupt context
  */
-static exti_ctx_t exti_chan;
+static gpio_isr_ctx_t exti_chan;
 
 int gpio_init(gpio_t pin, gpio_dir_t dir, gpio_pp_t pullup)
 {
@@ -78,11 +70,13 @@ int gpio_init_int(gpio_t pin, gpio_pp_t pullup, gpio_flank_t flank,
 
 void gpio_irq_enable(gpio_t pin)
 {
+    (void) pin;
     NRF_GPIOTE->INTENSET |= GPIOTE_INTENSET_IN0_Msk;
 }
 
 void gpio_irq_disable(gpio_t dev)
 {
+    (void) dev;
     NRF_GPIOTE->INTENCLR |= GPIOTE_INTENSET_IN0_Msk;
 }
 

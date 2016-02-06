@@ -34,12 +34,7 @@
 
 static BITFIELD(_gpio_config_bitfield, GPIO_NUM_ISR);
 
-typedef struct {
-    gpio_cb_t cb;       /**< callback called from GPIO interrupt */
-    void *arg;          /**< argument passed to the callback */
-} gpio_state_t;
-
-static gpio_state_t _gpio_states[GPIO_NUM_ISR];
+static gpio_isr_ctx_t _gpio_states[GPIO_NUM_ISR];
 static BITFIELD(_gpio_rising, GPIO_NUM_ISR);
 static BITFIELD(_gpio_falling, GPIO_NUM_ISR);
 static uint8_t _gpio_isr_map[64]; /* only ports 0+2 can have ISRs */
@@ -69,6 +64,7 @@ static int _isr_map_entry(gpio_t pin) {
 
 int gpio_init(gpio_t pin, gpio_dir_t dir, gpio_pp_t pullup)
 {
+    (void) dir;
     unsigned _pin = pin & 31;
     unsigned port = pin >> 5;
 
@@ -88,7 +84,9 @@ int gpio_init(gpio_t pin, gpio_dir_t dir, gpio_pp_t pullup)
     return 0;
 }
 
-int gpio_init_mux(unsigned pin, unsigned mux) {
+int gpio_init_mux(unsigned pin, unsigned mux)
+{
+    (void) mux;
     unsigned _pin = pin & 31;
     PINSEL[pin>>4] &= ~(0x1 << (_pin*2));
     return 0;

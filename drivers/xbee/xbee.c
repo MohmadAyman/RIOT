@@ -89,7 +89,7 @@ typedef struct {
 static uint8_t _cksum(uint8_t *buf, size_t size)
 {
     uint8_t res = 0xff;
-    for (int i = 3; i < size; i++) {
+    for (size_t i = 3; i < size; i++) {
         res -= buf[i];
     }
     return res;
@@ -136,8 +136,9 @@ static void _api_at_cmd(xbee_t *dev, uint8_t *cmd, uint8_t size, resp_t *resp)
 /*
  * Interrupt callbacks
  */
-static void _rx_cb(void *arg, char c)
+static void _rx_cb(void *arg, char _c)
 {
+    unsigned char c = _c;
     xbee_t *dev = (xbee_t *)arg;
     msg_t msg;
 
@@ -264,6 +265,13 @@ static int _set_addr(xbee_t *dev, uint8_t *val, size_t len)
     cmd[1] = 'Y';
     cmd[2] = val[0];
     cmd[3] = val[1];
+
+#ifdef MODULE_SIXLOWPAN
+    /* https://tools.ietf.org/html/rfc4944#section-12 requires the first bit to
+     * 0 for unicast addresses */
+    val[1] &= 0x7F;
+#endif
+
     _api_at_cmd(dev, cmd, 4, &resp);
     if (resp.status == 0) {
         memcpy(dev->addr_short, val, 2);
@@ -454,16 +462,28 @@ int xbee_init(xbee_t *dev, uart_t uart, uint32_t baudrate,
     _at_cmd(dev, "ATCN\r");
 
     /* load long address (we can not set it, its read only for Xbee devices) */
-    _get_addr_long(dev, dev->addr_long.uint8, 8);
+    if (_get_addr_long(dev, dev->addr_long.uint8, 8) < 0) {
+        DEBUG("xbee: Error getting address\n");
+        return -EIO;
+    }
     /* set default channel */
-    _set_addr(dev, &((dev->addr_long).uint8[6]), 2);
+    if (_set_addr(dev, &((dev->addr_long).uint8[6]), 2) < 0) {
+        DEBUG("xbee: Error setting short address\n");
+        return -EIO;
+    }
     tmp[1] = 0;
     tmp[0] = XBEE_DEFAULT_CHANNEL;
-    _set_channel(dev, tmp, 2);
+    if (_set_channel(dev, tmp, 2) < 0) {
+        DEBUG("xbee: Error setting channel\n");
+        return -EIO;
+    }
     /* set default PAN ID */
     tmp[1] = (uint8_t)(XBEE_DEFAULT_PANID >> 8);
     tmp[0] = (uint8_t)(XBEE_DEFAULT_PANID & 0xff);
-    _set_panid(dev, tmp, 2);
+    if (_set_panid(dev, tmp, 2) < 0) {
+        DEBUG("xbee: Error setting PAN ID\n");
+        return -EIO;
+    }
 
     DEBUG("xbee: Initialization successful\n");
     return 0;

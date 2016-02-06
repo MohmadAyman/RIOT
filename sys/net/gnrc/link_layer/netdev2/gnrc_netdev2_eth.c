@@ -17,8 +17,12 @@
  */
 
 #include "net/gnrc.h"
-#include "net/gnrc/gnrc_netdev2.h"
+#include "net/gnrc/netdev2.h"
 #include "net/ethernet/hdr.h"
+
+#ifdef MODULE_GNRC_IPV6
+#include "net/ipv6/hdr.h"
+#endif
 
 #include "od.h"
 
@@ -85,7 +89,7 @@ static gnrc_pktsnip_t *_recv(gnrc_netdev2_t *gnrc_netdev2)
         ((gnrc_netif_hdr_t *)netif_hdr->data)->if_pid = thread_getpid();
 
         DEBUG("gnrc_netdev2_eth: received packet from %02x:%02x:%02x:%02x:%02x:%02x "
-                "of length %zu\n",
+                "of length %d\n",
                 hdr->src[0], hdr->src[1], hdr->src[2], hdr->src[3], hdr->src[4],
                 hdr->src[5], nread);
 #if defined(MODULE_OD) && ENABLE_DEBUG
@@ -109,17 +113,16 @@ static inline void _addr_set_broadcast(uint8_t *dst)
     memset(dst, 0xff, ETHERNET_ADDR_LEN);
 }
 
-#define _IPV6_DST_OFFSET    (36)    /* sizeof(ipv6_hdr_t) - 4  */
-
 static inline void _addr_set_multicast(uint8_t *dst, gnrc_pktsnip_t *payload)
 {
     switch (payload->type) {
-#ifdef MODULE_IPV6
+#ifdef MODULE_GNRC_IPV6
         case GNRC_NETTYPE_IPV6:
+            /* https://tools.ietf.org/html/rfc2464#section-7 */
             dst[0] = 0x33;
             dst[1] = 0x33;
-            memcpy(dst + 2, ((uint8_t *)payload->data) + _IPV6_DST_OFFSET, 4);
-            /* TODO change to proper types when gnrc_ipv6_hdr_t got merged */
+            ipv6_hdr_t *ipv6 = payload->data;
+            memcpy(dst + 2, ipv6->dst.u8 + 12, 4);
             break;
 #endif
         default:

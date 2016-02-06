@@ -174,10 +174,10 @@ struct gnrc_rpl_parent {
     gnrc_rpl_parent_t *next;        /**< pointer to the next parent */
     uint8_t state;                  /**< 0 for unsued, 1 for used */
     ipv6_addr_t addr;               /**< link-local IPv6 address of this parent */
-    uint16_t rank;                  /**< rank of the parent */
     uint8_t dtsn;                   /**< last seen dtsn of this parent */
+    uint16_t rank;                  /**< rank of the parent */
     gnrc_rpl_dodag_t *dodag;        /**< DODAG the parent belongs to */
-    uint64_t lifetime;              /**< lifetime of this parent */
+    uint32_t lifetime;              /**< lifetime of this parent in seconds */
     double  link_metric;            /**< metric of the link */
     uint8_t link_metric_type;       /**< type of the metric */
 };
@@ -222,12 +222,7 @@ struct gnrc_rpl_dodag {
     bool dao_ack_received;          /**< flag to check for DAO-ACK */
     bool dodag_conf_requested;      /**< flag to send DODAG_CONF options */
     bool prefix_info_requested;     /**< flag to send PREFIX_INFO options */
-    msg_t dao_msg;                  /**< msg_t for firing a dao */
-    uint64_t dao_time;              /**< time to schedule the next DAO */
-    xtimer_t dao_timer;             /**< timer to schedule the next DAO */
-    msg_t cleanup_msg;              /**< msg_t for firing a cleanup */
-    uint32_t cleanup_time;          /**< time to schedula a DODAG cleanup */
-    xtimer_t cleanup_timer;         /**< timer to schedula a DODAG cleanup */
+    uint8_t dao_time;               /**< time to schedule a DAO in seconds */
     trickle_t trickle;              /**< trickle representation */
 };
 
@@ -242,6 +237,7 @@ struct gnrc_rpl_instance {
     gnrc_rpl_of_t *of;              /**< configured Objective Function */
     uint16_t min_hop_rank_inc;      /**< minimum hop rank increase */
     uint16_t max_rank_inc;          /**< max increase in the rank */
+    int8_t cleanup;                 /**< cleanup time in seconds */
 };
 
 #ifdef __cplusplus

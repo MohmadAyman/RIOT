@@ -20,7 +20,6 @@
 #include "net/gnrc/sixlowpan.h"
 #include "net/gnrc/sixlowpan/ctx.h"
 #include "random.h"
-#include "timex.h"
 
 #include "net/gnrc/sixlowpan/nd.h"
 
@@ -134,13 +133,14 @@ kernel_pid_t gnrc_sixlowpan_nd_next_hop_l2addr(uint8_t *l2addr, uint8_t *l2addr_
     next_hop = ipv6_ext_rh_next_hop(hdr);
 #endif
 #ifdef MODULE_FIB
+    kernel_pid_t fib_iface;
     ipv6_addr_t next_hop_actual;    /* FIB copies address into this variable */
     /* don't look-up link local addresses in FIB */
     if ((next_hop == NULL) && !ipv6_addr_is_link_local(dst)) {
         size_t next_hop_size = sizeof(ipv6_addr_t);
         uint32_t next_hop_flags = 0;
         if ((next_hop == NULL) &&
-            (fib_get_next_hop(&gnrc_ipv6_fib_table, &iface, next_hop_actual.u8, &next_hop_size,
+            (fib_get_next_hop(&gnrc_ipv6_fib_table, &fib_iface, next_hop_actual.u8, &next_hop_size,
                               &next_hop_flags, (uint8_t *)dst,
                               sizeof(ipv6_addr_t), 0) >= 0) &&
             (next_hop_size == sizeof(ipv6_addr_t))) {
@@ -151,14 +151,20 @@ kernel_pid_t gnrc_sixlowpan_nd_next_hop_l2addr(uint8_t *l2addr, uint8_t *l2addr_
 #ifdef MODULE_GNRC_SIXLOWPAN_ND_ROUTER
     /* next hop determination: https://tools.ietf.org/html/rfc6775#section-6.5.4 */
     nc_entry = gnrc_ipv6_nc_get(iface, dst);
+#ifdef MODULE_FIB
+    if ((next_hop != NULL) && (nc_entry == NULL)) {
+        nc_entry = gnrc_ipv6_nc_get(fib_iface, dst);
+    }
+#endif
     /* if NCE found */
     if (nc_entry != NULL) {
         gnrc_ipv6_netif_t *ipv6_if = gnrc_ipv6_netif_get(nc_entry->iface);
         /* and interface is not 6LoWPAN */
-        if (!(ipv6_if->flags & GNRC_IPV6_NETIF_FLAGS_SIXLOWPAN) ||
+        if (!((ipv6_if == NULL) ||
+                (ipv6_if->flags & GNRC_IPV6_NETIF_FLAGS_SIXLOWPAN)) ||
                 /* or entry is registered */
-                (gnrc_ipv6_nc_get_type(nc_entry) == GNRC_IPV6_NC_TYPE_REGISTERED)) {
-        next_hop = dst;
+              (gnrc_ipv6_nc_get_type(nc_entry) == GNRC_IPV6_NC_TYPE_REGISTERED)) {
+            next_hop = dst;
         }
     }
 #endif
@@ -169,6 +175,11 @@ kernel_pid_t gnrc_sixlowpan_nd_next_hop_l2addr(uint8_t *l2addr, uint8_t *l2addr_
     }
     else if (next_hop == NULL) {                                /* prefix is off-link */
         next_hop = gnrc_ndp_internal_default_router();
+    }
+
+    /* no routers found */
+    if (next_hop == NULL) {
+        return KERNEL_PID_UNDEF;
     }
 
     /* address resolution of next_hop: https://tools.ietf.org/html/rfc6775#section-5.7 */
@@ -207,20 +218,15 @@ kernel_pid_t gnrc_sixlowpan_nd_next_hop_l2addr(uint8_t *l2addr, uint8_t *l2addr_
         }
         return iface;
     }
-    if ((nc_entry == NULL) || (!gnrc_ipv6_nc_is_reachable(nc_entry)) ||
-        (gnrc_ipv6_nc_get_type(nc_entry) == GNRC_IPV6_NC_TYPE_TENTATIVE)) {
+    if ((gnrc_ipv6_nc_get_type(nc_entry) == GNRC_IPV6_NC_TYPE_TENTATIVE)) {
         return KERNEL_PID_UNDEF;
     }
     else {
-        if (nc_entry->l2_addr_len > 0) {
-            memcpy(l2addr, nc_entry->l2_addr, nc_entry->l2_addr_len);
-        }
-        *l2addr_len = nc_entry->l2_addr_len;
         if (gnrc_ipv6_nc_get_state(nc_entry) == GNRC_IPV6_NC_STATE_STALE) {
             gnrc_ndp_internal_set_state(nc_entry, GNRC_IPV6_NC_STATE_DELAY);
         }
     }
-    return nc_entry->iface;
+    return gnrc_ipv6_nc_get_l2_addr(l2addr, l2addr_len, nc_entry);
 }
 
 void gnrc_sixlowpan_nd_rtr_sol_reschedule(gnrc_ipv6_nc_t *nce, uint32_t sec_delay)
@@ -373,6 +379,7 @@ uint8_t gnrc_sixlowpan_nd_opt_ar_handle(kernel_pid_t iface, ipv6_hdr_t *ipv6,
 
 bool gnrc_sixlowpan_nd_opt_6ctx_handle(uint8_t icmpv6_type, sixlowpan_nd_opt_6ctx_t *ctx_opt)
 {
+#ifdef MODULE_GNRC_SIXLOWPAN_CTX
     if (((ctx_opt->ctx_len <= 64) && (ctx_opt->len != 2)) ||
         ((ctx_opt->ctx_len > 64) && (ctx_opt->len != 3))) {
         DEBUG("6lo nd: invalid 6LoWPAN context option received\n");
@@ -386,6 +393,7 @@ bool gnrc_sixlowpan_nd_opt_6ctx_handle(uint8_t icmpv6_type, sixlowpan_nd_opt_6ct
     gnrc_sixlowpan_ctx_update(sixlowpan_nd_opt_6ctx_get_cid(ctx_opt), (ipv6_addr_t *)(ctx_opt + 1),
                               ctx_opt->ctx_len, byteorder_ntohs(ctx_opt->ltime),
                               sixlowpan_nd_opt_6ctx_is_comp(ctx_opt));
+#endif
     return true;
 }
 

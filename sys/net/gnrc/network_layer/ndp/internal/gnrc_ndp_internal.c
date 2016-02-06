@@ -20,8 +20,7 @@
 #include "net/gnrc/sixlowpan/ctx.h"
 #include "net/gnrc/sixlowpan/nd.h"
 #include "random.h"
-#include "timex.h"
-#include "vtimer.h"
+#include "xtimer.h"
 
 #include "net/gnrc/ndp/internal.h"
 
@@ -92,7 +91,7 @@ ipv6_addr_t *gnrc_ndp_internal_default_router(void)
 void gnrc_ndp_internal_set_state(gnrc_ipv6_nc_t *nc_entry, uint8_t state)
 {
     gnrc_ipv6_netif_t *ipv6_iface;
-    timex_t t = { GNRC_NDP_FIRST_PROBE_DELAY, 0 };
+    uint32_t t = GNRC_NDP_FIRST_PROBE_DELAY * SEC_IN_USEC;
 
     nc_entry->flags &= ~GNRC_IPV6_NC_STATE_MASK;
     nc_entry->flags |= state;
@@ -103,9 +102,7 @@ void gnrc_ndp_internal_set_state(gnrc_ipv6_nc_t *nc_entry, uint8_t state)
     switch (state) {
         case GNRC_IPV6_NC_STATE_REACHABLE:
             ipv6_iface = gnrc_ipv6_netif_get(nc_entry->iface);
-            DEBUG("REACHABLE (reachable time = %" PRIu32 ".%06" PRIu32 ")\n",
-                  ipv6_iface->reach_time.seconds,
-                  ipv6_iface->reach_time.microseconds);
+            DEBUG("REACHABLE (reachable time = %" PRIu32 " us)\n", ipv6_iface->reach_time);
             t = ipv6_iface->reach_time;
 
             /* we intentionally fall through here to set the desired timeout t */
@@ -116,26 +113,22 @@ void gnrc_ndp_internal_set_state(gnrc_ipv6_nc_t *nc_entry, uint8_t state)
                       GNRC_NDP_FIRST_PROBE_DELAY);
             }
 #endif
-            gnrc_ndp_internal_reset_nbr_sol_timer(nc_entry, (uint32_t) timex_uint64(t),
-                                                  GNRC_NDP_MSG_NC_STATE_TIMEOUT, gnrc_ipv6_pid);
+            gnrc_ndp_internal_reset_nbr_sol_timer(nc_entry, t, GNRC_NDP_MSG_NC_STATE_TIMEOUT,
+                                                  gnrc_ipv6_pid);
             break;
 
         case GNRC_IPV6_NC_STATE_PROBE:
             ipv6_iface = gnrc_ipv6_netif_get(nc_entry->iface);
 
             nc_entry->probes_remaining = GNRC_NDP_MAX_UC_NBR_SOL_NUMOF;
-            DEBUG("PROBE (probe with %" PRIu8 " unicast NS every %" PRIu32
-                  ".%06" PRIu32 " seconds)\n", nc_entry->probes_remaining,
-                  ipv6_iface->retrans_timer.seconds,
-                  ipv6_iface->retrans_timer.microseconds);
+            DEBUG("PROBE (probe with %" PRIu8 " unicast NS every %" PRIu32 " us)\n",
+                  nc_entry->probes_remaining, ipv6_iface->retrans_timer);
 
             gnrc_ndp_internal_send_nbr_sol(nc_entry->iface, NULL, &nc_entry->ipv6_addr,
                                            &nc_entry->ipv6_addr);
 
             mutex_lock(&ipv6_iface->mutex);
-            gnrc_ndp_internal_reset_nbr_sol_timer(nc_entry, (uint32_t) timex_uint64(
-                                                    ipv6_iface->retrans_timer
-                                                  ),
+            gnrc_ndp_internal_reset_nbr_sol_timer(nc_entry, ipv6_iface->retrans_timer,
                                                   GNRC_NDP_MSG_NBR_SOL_RETRANS, gnrc_ipv6_pid);
             mutex_unlock(&ipv6_iface->mutex);
             break;
@@ -356,21 +349,29 @@ void gnrc_ndp_internal_send_rtr_sol(kernel_pid_t iface, ipv6_addr_t *dst)
 }
 
 #if (defined(MODULE_GNRC_NDP_ROUTER) || defined(MODULE_GNRC_SIXLOWPAN_ND_ROUTER))
-static bool _pio_from_iface_addr(gnrc_pktsnip_t **res, gnrc_ipv6_netif_addr_t *addr,
-                                 gnrc_pktsnip_t *next)
+static bool _pio_from_iface_addr(gnrc_pktsnip_t **res, gnrc_ipv6_netif_t *iface,
+                                 gnrc_ipv6_netif_addr_t *addr, gnrc_pktsnip_t *next)
 {
     assert(((uint8_t) addr->prefix_len) <= 128U);
 
     if (!ipv6_addr_is_unspecified(&addr->addr) &&
         !ipv6_addr_is_link_local(&addr->addr) &&
         !gnrc_ipv6_netif_addr_is_non_unicast(&addr->addr)) {
+        uint8_t flags = 0;
         DEBUG(" - PIO for %s/%" PRIu8 "\n", ipv6_addr_to_str(addr_str, &addr->addr,
                                                              sizeof(addr_str)),
               addr->prefix_len);
-        *res = gnrc_ndp_opt_pi_build(addr->prefix_len, (addr->flags &
-                                     (GNRC_IPV6_NETIF_ADDR_FLAGS_NDP_AUTO |
-                                      GNRC_IPV6_NETIF_ADDR_FLAGS_NDP_ON_LINK)),
-                                     addr->valid, addr->preferred, &addr->addr, next);
+
+#ifdef MODULE_GNRC_SIXLOWPAN_ND
+        if (!(iface->flags & GNRC_IPV6_NETIF_FLAGS_SIXLOWPAN)) {
+            flags = GNRC_IPV6_NETIF_ADDR_FLAGS_NDP_ON_LINK;
+        }
+#else
+        (void) iface;
+#endif
+
+        *res = gnrc_ndp_opt_pi_build(addr->prefix_len, addr->flags | flags, addr->valid,
+                                     addr->preferred, &addr->addr, next);
         return true;
     }
     return false;
@@ -386,10 +387,8 @@ static inline bool _check_prefixes(gnrc_ipv6_netif_addr_t *a, gnrc_ipv6_netif_ad
     return false;
 }
 
-static gnrc_pktsnip_t *_add_pios(gnrc_ipv6_netif_t *ipv6_iface, gnrc_pktsnip_t *pkt)
+static bool _add_pios(gnrc_pktsnip_t **res, gnrc_ipv6_netif_t *ipv6_iface, gnrc_pktsnip_t *pkt)
 {
-    gnrc_pktsnip_t *tmp;
-
     for (int i = 0; i < GNRC_IPV6_NETIF_ADDR_NUMOF; i++) {
         /* skip if prefix has been processed already */
         bool processed_before = false;
@@ -405,24 +404,24 @@ static gnrc_pktsnip_t *_add_pios(gnrc_ipv6_netif_t *ipv6_iface, gnrc_pktsnip_t *
             continue;
         }
 
-        if (_pio_from_iface_addr(&tmp, &ipv6_iface->addrs[i], pkt)) {
-            if (tmp != NULL) {
-                pkt = tmp;
+        if (_pio_from_iface_addr(res, ipv6_iface, &ipv6_iface->addrs[i], pkt)) {
+            if (*res != NULL) {
+                pkt = *res;
             }
             else {
                 DEBUG("ndp rtr: error allocating PIO\n");
                 gnrc_pktbuf_release(pkt);
-                return NULL;
+                return false;
             }
         }
     }
-    return pkt;
+    return true;
 }
 
 void gnrc_ndp_internal_send_rtr_adv(kernel_pid_t iface, ipv6_addr_t *src, ipv6_addr_t *dst,
                                     bool fin)
 {
-    gnrc_pktsnip_t *hdr, *pkt = NULL;
+    gnrc_pktsnip_t *hdr = NULL, *pkt = NULL;
     ipv6_addr_t all_nodes = IPV6_ADDR_ALL_NODES_LINK_LOCAL;
     gnrc_ipv6_netif_t *ipv6_iface = gnrc_ipv6_netif_get(iface);
     uint32_t reach_time = 0, retrans_timer = 0;
@@ -438,8 +437,7 @@ void gnrc_ndp_internal_send_rtr_adv(kernel_pid_t iface, ipv6_addr_t *src, ipv6_a
 #ifdef MODULE_GNRC_SIXLOWPAN_ND_ROUTER
     if (!(ipv6_iface->flags & GNRC_IPV6_NETIF_FLAGS_SIXLOWPAN)) {
 #endif
-    hdr = _add_pios(ipv6_iface, pkt);
-    if (hdr == NULL) {
+    if (!_add_pios(&hdr, ipv6_iface, pkt)) {
         /* pkt already released in _add_pios */
         mutex_unlock(&ipv6_iface->mutex);
         return;
@@ -472,13 +470,14 @@ void gnrc_ndp_internal_send_rtr_adv(kernel_pid_t iface, ipv6_addr_t *src, ipv6_a
                     continue;
                 }
 
-                if (_pio_from_iface_addr(&hdr, prf->prefix, pkt)) {
+                if (_pio_from_iface_addr(&hdr, ipv6_iface, prf->prefix, pkt)) {
                     if (hdr != NULL) {
                         pkt = hdr;
                     }
                     else {
                         DEBUG("ndp rtr: error allocating PIO\n");
                         gnrc_pktbuf_release(pkt);
+                        mutex_unlock(&ipv6_iface->mutex);
                         return;
                     }
                 }
@@ -494,6 +493,7 @@ void gnrc_ndp_internal_send_rtr_adv(kernel_pid_t iface, ipv6_addr_t *src, ipv6_a
                                                        &ctx->prefix, pkt);
                 if (hdr == NULL) {
                     DEBUG("ndp rtr: error allocating 6CO\n");
+                    mutex_unlock(&ipv6_iface->mutex);
                     gnrc_pktbuf_release(pkt);
                     return;
                 }
@@ -502,6 +502,7 @@ void gnrc_ndp_internal_send_rtr_adv(kernel_pid_t iface, ipv6_addr_t *src, ipv6_a
             hdr = gnrc_sixlowpan_nd_opt_abr_build(abr->version, abr->ltime, &abr->addr, pkt);
             if (hdr == NULL) {
                 DEBUG("ndp internal: error allocating ABRO.\n");
+                mutex_unlock(&ipv6_iface->mutex);
                 gnrc_pktbuf_release(pkt);
                 return;
             }
@@ -550,20 +551,16 @@ void gnrc_ndp_internal_send_rtr_adv(kernel_pid_t iface, ipv6_addr_t *src, ipv6_a
         cur_hl = ipv6_iface->cur_hl;
     }
     if (ipv6_iface->flags & GNRC_IPV6_NETIF_FLAGS_ADV_REACH_TIME) {
-        uint64_t tmp = timex_uint64(ipv6_iface->reach_time) / MS_IN_USEC;
 
-        if (tmp > (3600 * SEC_IN_MS)) { /* tmp > 1 hour */
-            tmp = (3600 * SEC_IN_MS);
+        if (ipv6_iface->reach_time > (3600 * SEC_IN_USEC)) { /* reach_time > 1 hour */
+            reach_time = (3600 * SEC_IN_MS);
         }
-
-        reach_time = (uint32_t)tmp;
+        else {
+            reach_time = ipv6_iface->reach_time / MS_IN_USEC;
+        }
     }
     if (ipv6_iface->flags & GNRC_IPV6_NETIF_FLAGS_ADV_RETRANS_TIMER) {
-        uint64_t tmp = timex_uint64(ipv6_iface->retrans_timer) / MS_IN_USEC;
-        if (tmp > UINT32_MAX) {
-            tmp = UINT32_MAX;
-        }
-        retrans_timer = (uint32_t)tmp;
+        retrans_timer = ipv6_iface->retrans_timer / MS_IN_USEC;
     }
     if (!fin) {
         adv_ltime = ipv6_iface->adv_ltime;
@@ -612,6 +609,24 @@ int gnrc_ndp_internal_sl2a_opt_handle(gnrc_pktsnip_t *pkt, ipv6_hdr_t *ipv6, uin
         pkt = pkt->next;
     }
 
+#ifdef MODULE_GNRC_SIXLOWPAN_ND
+    if ((sl2a_len == 2) || (sl2a_len == 8)) {
+        /* The link-layer seems to be IEEE 802.15.4.
+         * Determining address length from the option length:
+         * https://tools.ietf.org/html/rfc4944#section-8 */
+        if (sl2a_opt->len == 1) {
+            sl2a_len = 2;
+        }
+        else if (sl2a_opt->len == 2) {
+            sl2a_len = 8;
+        }
+        else {
+            DEBUG("ndp: invalid source link-layer address option received\n");
+            return -EINVAL;
+        }
+    }
+#endif
+
     DEBUG("ndp: received SL2A (link-layer address: %s)\n",
           gnrc_netif_addr_to_str(addr_str, sizeof(addr_str), sl2a, sl2a_len));
 
@@ -658,6 +673,23 @@ int gnrc_ndp_internal_tl2a_opt_handle(gnrc_pktsnip_t *pkt, ipv6_hdr_t *ipv6,
                 }
                 pkt = pkt->next;
             }
+#ifdef MODULE_GNRC_SIXLOWPAN_ND
+            if ((tl2a_len == 2) || (tl2a_len == 8)) {
+                /* The link-layer seems to be IEEE 802.15.4.
+                 * Determining address length from the option length:
+                 * https://tools.ietf.org/html/rfc4944#section-8 */
+                if (tl2a_opt->len == 1) {
+                    tl2a_len = 2;
+                }
+                else if (tl2a_opt->len == 2) {
+                    tl2a_len = 8;
+                }
+                else {
+                    DEBUG("ndp: invalid target link-layer address option received\n");
+                    return -EINVAL;
+                }
+            }
+#endif
 
             if (tl2a_len == 0) {  /* in case there was no source address in l2 */
                 tl2a_len = (tl2a_opt->len / 8) - sizeof(ndp_opt_t);
@@ -724,13 +756,16 @@ bool gnrc_ndp_internal_pi_opt_handle(kernel_pid_t iface, uint8_t icmpv6_type,
     if (((prefix == NULL) ||
          (gnrc_ipv6_netif_addr_get(prefix)->prefix_len != pi_opt->prefix_len)) &&
         (pi_opt->valid_ltime.u32 != 0)) {
-        ipv6_addr_t pref_addr;
+        ipv6_addr_t pref_addr = IPV6_ADDR_UNSPECIFIED;
 
-        if ((gnrc_netapi_get(iface, NETOPT_IPV6_IID, 0, &pref_addr.u64[1],
-                             sizeof(eui64_t)) < 0)) {
-            DEBUG("ndp: could not get IID from interface %d\n", iface);
-            return false;
+        if (pi_opt->flags & NDP_OPT_PI_FLAGS_A) {
+            if ((gnrc_netapi_get(iface, NETOPT_IPV6_IID, 0, &pref_addr.u64[1],
+                                 sizeof(eui64_t)) < 0)) {
+                DEBUG("ndp: could not get IID from interface %d\n", iface);
+                return false;
+            }
         }
+
         ipv6_addr_init_prefix(&pref_addr, &pi_opt->prefix, pi_opt->prefix_len);
         prefix = gnrc_ipv6_netif_add_addr(iface, &pref_addr,
                                           pi_opt->prefix_len,
@@ -760,7 +795,7 @@ bool gnrc_ndp_internal_pi_opt_handle(kernel_pid_t iface, uint8_t icmpv6_type,
     }
     /* TODO: preferred lifetime for address auto configuration */
     /* on-link flag MUST stay set if it was */
-    netif_addr->flags &= ~NDP_OPT_PI_FLAGS_A;
+    netif_addr->flags &= NDP_OPT_PI_FLAGS_L;
     netif_addr->flags |= (pi_opt->flags & NDP_OPT_PI_FLAGS_MASK);
     return true;
 }

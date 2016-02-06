@@ -33,10 +33,17 @@
 #include "cpu.h"
 #include "board.h"
 #include "thread.h"
-#include "kernel.h"
+#include "reboot.h"
 #include "irq.h"
+#include "log.h"
 
 #include "uart_stdio.h"
+
+#ifdef MODULE_XTIMER
+#include <sys/time.h>
+#include "div.h"
+#include "xtimer.h"
+#endif
 
 /**
  * @brief manage the heap
@@ -71,8 +78,8 @@ void _fini(void)
  */
 void _exit(int n)
 {
-    printf("#! exit %i: resetting\n", n);
-    reboot(n);
+    LOG_INFO("#! exit %i: resetting\n", n);
+    reboot();
     while(1);
 }
 
@@ -80,10 +87,10 @@ void _exit(int n)
  * @brief Allocate memory from the heap.
  *
  * The current heap implementation is very rudimentary, it is only able to allocate
- * memory. But it does not
- * - have any means to free memory again
+ * memory. But it does not have any means to free memory again
  *
- * @return [description]
+ * @return      pointer to the newly allocated memory on success
+ * @return      pointer set to address `-1` on failure
  */
 void *_sbrk_r(struct _reent *r, ptrdiff_t incr)
 {
@@ -322,3 +329,15 @@ int _kill(pid_t pid, int sig)
     errno = ESRCH;                         /* not implemented yet */
     return -1;
 }
+
+#ifdef MODULE_XTIMER
+int _gettimeofday_r(struct _reent *r, struct timeval *restrict tp, void *restrict tzp)
+{
+    (void)tzp;
+    (void) r;
+    uint64_t now = xtimer_now64();
+    tp->tv_sec = div_u64_by_1000000(now);
+    tp->tv_usec = now - (tp->tv_sec * SEC_IN_USEC);
+    return 0;
+}
+#endif

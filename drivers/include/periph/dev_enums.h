@@ -7,15 +7,15 @@
  */
 
 /**
- * @ingroup     driver_periph
+ * @ingroup     drivers_periph
  *
  * @{
  * @file
  * @brief       Device enumerations for backward compatibility with existing
  *              peripheral driver implementations
  *
- * TODO: Remove this file once all peripheral drivers are ported to the more
- *       efficient implementations style
+ * @todo        Remove this file once all peripheral drivers are ported to the
+ *              more efficient implementations style
  *
  * @author      Hauke Petersen <hauke.petersen@fu-berlin.de>
  */
@@ -45,7 +45,7 @@ enum {
 #if TIMER_3_EN
     TIMER_3,                /**< 4th timer */
 #endif
-    TIMER_UNDEFINED,        /**< deprecated legacy undefined values */
+    TIMER_UNDEFINED         /**< deprecated legacy undefined values */
 };
 
 /**

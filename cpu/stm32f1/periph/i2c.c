@@ -98,6 +98,9 @@ int i2c_init_master(i2c_t dev, i2c_speed_t speed)
             return -1;
     }
 
+    /* disable peripheral */
+    i2c->CR1 &= ~I2C_CR1_PE;
+
     /* configure pins */
     _pin_config(pin_scl, pin_sda);
     /* configure device */
@@ -448,6 +451,8 @@ static inline void _stop(I2C_TypeDef *dev)
     while (!(dev->SR1 & I2C_SR1_BTF));
     /* send STOP condition */
     dev->CR1 |= I2C_CR1_STOP;
+    /* wait until transmission is complete */
+    while (dev->SR2 & I2C_SR2_BUSY);
 }
 
 #if I2C_0_EN
