@@ -35,7 +35,18 @@ extern "C" {
 #define CLOCK_AHB_DIV       RCC_CFGR_HPRE_DIV1
 #define CLOCK_APB2_DIV      RCC_CFGR_PPRE2_DIV1
 #define CLOCK_APB1_DIV      RCC_CFGR_PPRE1_DIV2
-#define CLOCK_FLASH_LATENCY FLASH_ACR_LATENCY_1
+#define CLOCK_FLASH_LATENCY FLASH_ACR_LATENCY_2
+/** @} */
+
+/**
+ * @brief   DAC configuration
+ * @{
+ */
+#define DAC_CONFIG {                \
+    { GPIO_PIN(PORT_A, 4), 0, 0 },  \
+}
+
+#define DAC_NUMOF           (1)
 /** @} */
 
 /**
@@ -49,7 +60,7 @@ extern "C" {
 /* Timer 0 configuration */
 #define TIMER_0_DEV         TIM2
 #define TIMER_0_CHANNELS    4
-#define TIMER_0_PRESCALER   (71U)
+#define TIMER_0_FREQ        (CLOCK_CORECLOCK)
 #define TIMER_0_MAX_VALUE   (0xffffffff)
 #define TIMER_0_CLKEN()     (RCC->APB1ENR |= RCC_APB1ENR_TIM2EN)
 #define TIMER_0_ISR         isr_tim2
@@ -110,7 +121,7 @@ extern "C" {
  * @brief PWM configuration
  * @{
  */
-#define PWM_NUMOF           (1U)
+#define PWM_NUMOF           (2U)
 #define PWM_0_EN            1
 #define PWM_1_EN            1
 

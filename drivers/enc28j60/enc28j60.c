@@ -19,17 +19,18 @@
  */
 
 #include <errno.h>
+#include <string.h>
 
 #include "mutex.h"
 #include "xtimer.h"
 #include "assert.h"
 #include "net/ethernet.h"
-#include "net/netdev2_eth.h"
+#include "net/netdev2/eth.h"
 
 #include "enc28j60.h"
 #include "enc28j60_regs.h"
 
-#if CPUID_ID_LEN
+#if CPUID_LEN
 #include "periph/cpuid.h"
 #endif
 
@@ -215,7 +216,7 @@ static void mac_set(enc28j60_t *dev, uint8_t *mac)
 static void on_int(void *arg)
 {
     netdev2_t *netdev = (netdev2_t *)arg;
-    netdev->event_callback(arg, NETDEV2_EVENT_ISR, NULL);
+    netdev->event_callback(arg, NETDEV2_EVENT_ISR, netdev->isr_arg);
 }
 
 static int nd_send(netdev2_t *netdev, const struct iovec *data, int count)
@@ -226,6 +227,9 @@ static int nd_send(netdev2_t *netdev, const struct iovec *data, int count)
 
     mutex_lock(&dev->devlock);
 
+#ifdef MODULE_NETSTATS_L2
+    netdev->stats.tx_bytes += count;
+#endif
     /* set write pointer */
     cmd_w_addr(dev, ADDR_WRITE_PTR, BUF_TX_START);
     /* write control byte and the actual data into the buffer */
@@ -243,13 +247,14 @@ static int nd_send(netdev2_t *netdev, const struct iovec *data, int count)
     return c;
 }
 
-static int nd_recv(netdev2_t *netdev, char *buf, int max_len)
+static int nd_recv(netdev2_t *netdev, char *buf, int max_len, void *info)
 {
     enc28j60_t *dev = (enc28j60_t *)netdev;
     uint8_t head[6];
     size_t size;
     uint16_t next;
 
+    (void)info;
     mutex_lock(&dev->devlock);
 
     /* set read pointer to RX read address */
@@ -261,6 +266,10 @@ static int nd_recv(netdev2_t *netdev, char *buf, int max_len)
     size = (size_t)((head[3] << 8) | head[2]) - 4;  /* discard CRC */
 
     if (buf != NULL) {
+#ifdef MODULE_NETSTATS_L2
+        netdev->stats.rx_count++;
+        netdev2->stats.rx_bytes += size;
+#endif
         /* read packet content into the supplied buffer */
         if (size <= max_len) {
             cmd_rbm(dev, (uint8_t *)buf, size);
@@ -287,11 +296,11 @@ static int nd_init(netdev2_t *netdev)
     mutex_lock(&dev->devlock);
 
     /* setup the low-level interfaces */
-    gpio_init(dev->reset_pin, GPIO_DIR_OUT, GPIO_NOPULL);
+    gpio_init(dev->reset_pin, GPIO_OUT);
     gpio_clear(dev->reset_pin);     /* this puts the device into reset state */
-    gpio_init(dev->cs_pin, GPIO_DIR_OUT, GPIO_NOPULL);
+    gpio_init(dev->cs_pin, GPIO_OUT);
     gpio_set(dev->cs_pin);
-    gpio_init_int(dev->int_pin, GPIO_NOPULL, GPIO_FALLING, on_int, (void *)dev);
+    gpio_init_int(dev->int_pin, GPIO_IN, GPIO_FALLING, on_int, (void *)dev);
     res = spi_init_master(dev->spi, SPI_CONF_FIRST_RISING, SPI_SPEED);
     if (res < 0) {
         DEBUG("[enc28j60] init: error initializing SPI bus [%i]\n", res);
@@ -344,8 +353,8 @@ static int nd_init(netdev2_t *netdev)
     /* set non-back-to-back inter packet gap -> 0x12 is default */
     cmd_wcr(dev, REG_B2_MAIPGL, 2, MAIPGL_FD);
     /* set default MAC address */
-#if CPUID_ID_LEN
-    uint8_t macbuf[CPUID_ID_LEN];
+#if CPUID_LEN
+    uint8_t macbuf[CPUID_LEN];
     cpuid_get(&macbuf);     /* we get the full ID but use only parts of it */
     macbuf[0] |= 0x02;      /* locally administered address */
     macbuf[0] &= ~0x01;     /* unicast address */
@@ -415,6 +424,9 @@ static void nd_isr(netdev2_t *netdev)
         }
         eir = cmd_rcr(dev, REG_EIR, -1);
     }
+#ifdef MODULE_NETSTATS_L2
+    memset(&netdev->stats, 0, sizeof(netstats_t));
+#endif
 }
 
 static int nd_get(netdev2_t *netdev, netopt_t opt, void *value, size_t max_len)
